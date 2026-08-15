@@ -1,0 +1,56 @@
+<?php
+
+/*
+ *
+ *    _              _               
+ *   / \   _ __ ___ | |__   ___ _ __ 
+ *  / _ \ | '_ ` _ \| '_ \ / _ \ '__|
+ * / ___ \| | | | | | |_) |  __/ |   
+ * /_/   \_\_| |_| |_|_.__/ \___|_|   
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * @author AmberPM Team
+ * @link https://github.com/Amber-PM/Amber
+ *
+ *
+ */
+
+declare(strict_types=1);
+
+namespace pocketmine\data\bedrock;
+
+use pocketmine\utils\SingletonTrait;
+use pocketmine\world\sound\NoteInstrument;
+
+final class NoteInstrumentIdMap{
+	use SingletonTrait;
+	/** @phpstan-use IntSaveIdMapTrait<NoteInstrument> */
+	use IntSaveIdMapTrait;
+
+	private function __construct(){
+		foreach(NoteInstrument::cases() as $case){
+			$this->register(match($case){
+				NoteInstrument::PIANO => 0,
+				NoteInstrument::BASS_DRUM => 1,
+				NoteInstrument::SNARE => 2,
+				NoteInstrument::CLICKS_AND_STICKS => 3,
+				NoteInstrument::DOUBLE_BASS => 4,
+				NoteInstrument::FLUTE => 5,
+				NoteInstrument::BELL => 6,
+				NoteInstrument::GUITAR => 7,
+				NoteInstrument::CHIME => 8,
+				NoteInstrument::XYLOPHONE => 9,
+				NoteInstrument::IRON_XYLOPHONE => 10,
+				NoteInstrument::COW_BELL => 11,
+				NoteInstrument::DIDGERIDOO => 12,
+				NoteInstrument::BIT => 13,
+				NoteInstrument::BANJO => 14,
+				NoteInstrument::PLING => 15,
+			}, $case);
+		}
+	}
+}

@@ -1,0 +1,243 @@
+<?php
+
+/*
+ *
+ *    _              _               
+ *   / \   _ __ ___ | |__   ___ _ __ 
+ *  / _ \ | '_ ` _ \| '_ \ / _ \ '__|
+ * / ___ \| | | | | | |_) |  __/ |   
+ * /_/   \_\_| |_| |_|_.__/ \___|_|   
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * @author AmberPM Team
+ * @link https://github.com/Amber-PM/Amber
+ *
+ *
+ */
+
+declare(strict_types=1);
+
+namespace pocketmine\network\mcpe\handler;
+
+use pocketmine\nbt\tag\CompoundTag;
+use pocketmine\network\mcpe\cache\CraftingDataCache;
+use pocketmine\network\mcpe\cache\StaticPacketCache;
+use pocketmine\network\mcpe\InventoryManager;
+use pocketmine\network\mcpe\NetworkSession;
+use pocketmine\network\mcpe\protocol\ItemRegistryPacket;
+use pocketmine\network\mcpe\protocol\PlayerAuthInputPacket;
+use pocketmine\network\mcpe\protocol\ProtocolInfo;
+use pocketmine\network\mcpe\protocol\RequestChunkRadiusPacket;
+use pocketmine\network\mcpe\protocol\ServerboundLoadingScreenPacket;
+use pocketmine\network\mcpe\protocol\SetLocalPlayerAsInitializedPacket;
+use pocketmine\network\mcpe\protocol\StartGamePacket;
+use pocketmine\network\mcpe\protocol\types\BlockPosition;
+use pocketmine\network\mcpe\protocol\types\BoolGameRule;
+use pocketmine\network\mcpe\protocol\types\CacheableNbt;
+use pocketmine\network\mcpe\protocol\types\DimensionIds;
+use pocketmine\network\mcpe\protocol\types\Experiments;
+use pocketmine\network\mcpe\protocol\types\LevelSettings;
+use pocketmine\network\mcpe\protocol\types\NetworkPermissions;
+use pocketmine\network\mcpe\protocol\types\PlayerMovementSettings;
+use pocketmine\network\mcpe\protocol\types\ServerAuthMovementMode;
+use pocketmine\network\mcpe\protocol\types\ServerTelemetryData;
+use pocketmine\network\mcpe\protocol\types\SpawnSettings;
+use pocketmine\player\Player;
+use pocketmine\Server;
+use pocketmine\timings\Timings;
+use pocketmine\VersionInfo;
+use Ramsey\Uuid\Uuid;
+use function sprintf;
+
+/**
+ * Handler used for the pre-spawn phase of the session.
+ */
+#[SilentDiscard(PlayerAuthInputPacket::class, comment: "Spammed after StartGame even though player has no controls")]
+#[SilentDiscard(ServerboundLoadingScreenPacket::class, "Not needed")]
+class PreSpawnPacketHandler extends PacketHandler{
+	public function __construct(
+		private Server $server,
+		private Player $player,
+		private NetworkSession $session,
+		private InventoryManager $inventoryManager
+	){}
+
+	public function setUp() : void{
+		Timings::$playerNetworkSendPreSpawnGameData->startTiming();
+		try{
+			$protocolId = $this->session->getProtocolId();
+			$location = $this->player->getLocation();
+			$world = $location->getWorld();
+
+			$typeConverter = $this->session->getTypeConverter();
+
+			if($protocolId === ProtocolInfo::PROTOCOL_1_2_13){
+				$this->logLegacyProtocol("sending StartGamePacket");
+			}
+			$this->session->getLogger()->debug("Preparing StartGamePacket");
+			$levelSettings = new LevelSettings();
+			$levelSettings->seed = -1;
+			$levelSettings->spawnSettings = new SpawnSettings(SpawnSettings::BIOME_TYPE_DEFAULT, "", DimensionIds::OVERWORLD); //TODO: implement this properly
+			$levelSettings->worldGamemode = $typeConverter->coreGameModeToProtocol($this->server->getGamemode());
+			$levelSettings->difficulty = $world->getDifficulty();
+			$levelSettings->spawnPosition = BlockPosition::fromVector3($world->getSpawnLocation());
+			$levelSettings->hasAchievementsDisabled = true;
+			$levelSettings->time = $world->getTime();
+			$levelSettings->eduEditionOffer = 0;
+			$levelSettings->rainLevel = 0; //TODO: implement these properly
+			$levelSettings->lightningLevel = 0;
+			$levelSettings->commandsEnabled = true;
+			$levelSettings->gameRules = [
+				"naturalregeneration" => new BoolGameRule(false, false), //Hack for client side regeneration
+				"locatorbar" => new BoolGameRule(false, false) //Disable client-side tracking of nearby players
+			];
+			$levelSettings->experiments = new Experiments([], false);
+
+			$this->session->sendDataPacket(StartGamePacket::create(
+				$this->player->getId(),
+				$this->player->getId(),
+				$typeConverter->coreGameModeToProtocol($this->player->getGamemode()),
+				$this->player->getOffsetPosition($location),
+				$location->pitch,
+				$location->yaw,
+				new CacheableNbt(CompoundTag::create()), //TODO: we don't care about this right now
+				$levelSettings,
+				"",
+				$this->server->getMotd(),
+				"",
+				false,
+				new PlayerMovementSettings(ServerAuthMovementMode::SERVER_AUTHORITATIVE_V3, 0, true),
+				0,
+				0,
+				"",
+				true,
+				sprintf("%s %s", VersionInfo::NAME, VersionInfo::VERSION()->getFullVersion(true)),
+				Uuid::fromString(Uuid::NIL),
+				false,
+				false,
+				false,
+				new NetworkPermissions(disableClientSounds: true),
+				true,
+				null,
+				new ServerTelemetryData("", "", "", ""),
+				[],
+				0,
+				$typeConverter->getItemTypeDictionary()->getEntries(),
+			));
+
+			if($this->session->getProtocolId() >= ProtocolInfo::PROTOCOL_1_21_60){
+				$this->session->getLogger()->debug("Sending items");
+				$this->session->sendDataPacket(ItemRegistryPacket::create($typeConverter->getItemTypeDictionary()->getEntries()));
+			}
+
+			//protocol 223 (1.2.13/1.2.16) predates AvailableActorIdentifiersPacket and BiomeDefinitionListPacket;
+			//the legacy client neither sends nor expects them, and the modern payload is not wire-compatible
+			if($protocolId === ProtocolInfo::PROTOCOL_1_2_13){
+				$this->logLegacyProtocol("skipping AvailableActorIdentifiersPacket: unsupported by legacy protocol");
+				$this->logLegacyProtocol("skipping BiomeDefinitionListPacket: unsupported by legacy protocol");
+			}else{
+				$this->session->getLogger()->debug("Sending actor identifiers");
+				$this->session->sendDataPacket(StaticPacketCache::getInstance()->getAvailableActorIdentifiers());
+
+				$this->session->getLogger()->debug("Sending biome definitions");
+				$this->session->sendDataPacket(StaticPacketCache::getInstance()->getBiomeDefs($this->session->getProtocolId()));
+			}
+
+			$this->session->getLogger()->debug("Sending attributes");
+			$this->session->getEntityEventBroadcaster()->syncAttributes([$this->session], $this->player, $this->player->getAttributeMap()->getAll());
+
+			//AvailableCommandsPacket for protocol 223 (1.2.13/1.2.16) is now serialized with a dedicated legacy
+			//wire layout (see CommandRawData/CommandParameterRawData/AvailableCommandsPacket::convertArg() in
+			//vendor/vapebw/bedrock-protocol): 1-byte command flags instead of a LE short, no trailing
+			//per-parameter flags byte, and legacy-era numeric argument type IDs. The enum/postfix/permission/
+			//overload/alias tables already used the correct legacy-compatible layout because they were already
+			//gated behind >= PROTOCOL_1_20_10 checks that protocol 223 never satisfies.
+			if($protocolId === ProtocolInfo::PROTOCOL_1_2_13){
+				$this->logLegacyProtocol("sending AvailableCommandsPacket using legacy 1.2.13 command layout");
+			}else{
+				$this->session->getLogger()->debug("Sending available commands");
+			}
+			$this->session->syncAvailableCommands();
+
+			//legacy client uses a single AdventureSettingsPacket instead of UpdateAbilitiesPacket +
+			//UpdateAdventureSettingsPacket; syncAbilities()/syncAdventureSettings() branch on protocol
+			//internally and send the right one.
+			$this->session->getLogger()->debug("Sending abilities");
+			$this->session->syncAbilities($this->player);
+			$this->session->syncAdventureSettings();
+
+			$this->session->getLogger()->debug("Sending effects");
+			foreach($this->player->getEffects()->all() as $effect){
+				$this->session->getEntityEventBroadcaster()->onEntityEffectAdded([$this->session], $this->player, $effect, false);
+			}
+
+			$this->session->getLogger()->debug("Sending actor metadata");
+			$this->player->sendData([$this->player]);
+
+			$this->session->getLogger()->debug("Sending inventory");
+			$this->inventoryManager->syncAll();
+			$this->inventoryManager->syncSelectedHotbarSlot();
+
+			//legacy client filled its creative tab via InventoryContentPacket(windowId=LEGACY_CREATIVE) as part of
+			//the normal inventory sync, not a dedicated CreativeContentPacket. Previously reverted because it
+			//reproducibly froze/crashed the 1.2.13 client at spawn; that was traced to CommonTypes::
+			//getItemStackWrapper()/putItemStackWrapper() having no protocol-223 wire format at all (see
+			//InventoryManager::syncLegacyCreative() doc comment). Re-enabled now that fix is in place - not yet
+			//confirmed dynamically against a real client.
+			if($protocolId === ProtocolInfo::PROTOCOL_1_2_13){
+				$this->logLegacyProtocol("sending legacy creative inventory via InventoryContentPacket(LEGACY_CREATIVE)");
+				$this->inventoryManager->syncLegacyCreative();
+			}else{
+				$this->session->getLogger()->debug("Sending creative inventory data");
+				$this->inventoryManager->syncCreative();
+			}
+
+			//ShapedRecipe/ShapelessRecipe/FurnaceRecipe have explicit PROTOCOL_1_2_13 branches matching the
+			//pre-1.12 legacy wire layout, and CraftingDataCache filters out recipe types/blocks
+			//(stonecutter, cartography table, smithing table, blast furnace, smoker, campfire) that didn't
+			//exist yet on that client. Not yet confirmed dynamically against a real 1.2.13 client.
+			if($protocolId === ProtocolInfo::PROTOCOL_1_2_13){
+				$this->logLegacyProtocol("sending CraftingDataPacket using legacy 1.2.13 recipe layout");
+			}else{
+				$this->session->getLogger()->debug("Sending crafting data");
+			}
+			$this->session->sendDataPacket(CraftingDataCache::getInstance($protocolId)->getCache($this->server->getCraftingManager()));
+
+			$this->session->getLogger()->debug("Sending player list");
+			$this->session->syncPlayerList($this->server->getOnlinePlayers());
+		}finally{
+			Timings::$playerNetworkSendPreSpawnGameData->stopTiming();
+		}
+	}
+
+	/**
+	 * Logs a skipped/adapted step of the legacy 1.2.13-1.2.16 login sequence.
+	 * Only call this when the caller has already confirmed the session is on that protocol.
+	 */
+	private function logLegacyProtocol(string $message) : void{
+		$this->session->getLogger()->debug("[legacy protocol] " . $message);
+	}
+
+	public function handleRequestChunkRadius(RequestChunkRadiusPacket $packet) : bool{
+		$this->player->setViewDistance($packet->radius);
+
+		return true;
+	}
+
+	/**
+	 * WaterdogPE (and other proxies) fast-forward the client through the spawn sequence on a
+	 * server-to-server transfer, so the client can send SetLocalPlayerAsInitialized while we are
+	 * still in the pre-spawn phase (before terrain is ready). Record it so notifyTerrainReady()
+	 * completes the spawn instead of waiting forever for a response that already arrived — otherwise
+	 * the spawn deadlocks and PlayerJoinEvent never fires (no scoreboard/chat/join handling).
+	 */
+	public function handleSetLocalPlayerAsInitialized(SetLocalPlayerAsInitializedPacket $packet) : bool{
+		$this->session->notifyEarlySpawnResponse();
+
+		return true;
+	}
+}

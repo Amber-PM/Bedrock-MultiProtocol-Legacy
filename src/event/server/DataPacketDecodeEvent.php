@@ -1,0 +1,54 @@
+<?php
+
+/*
+ *
+ *    _              _               
+ *   / \   _ __ ___ | |__   ___ _ __ 
+ *  / _ \ | '_ ` _ \| '_ \ / _ \ '__|
+ * / ___ \| | | | | | |_) |  __/ |   
+ * /_/   \_\_| |_| |_|_.__/ \___|_|   
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * @author AmberPM Team
+ * @link https://github.com/Amber-PM/Amber
+ *
+ *
+ */
+
+declare(strict_types=1);
+
+namespace pocketmine\event\server;
+
+use pocketmine\event\Cancellable;
+use pocketmine\event\CancellableTrait;
+use pocketmine\network\mcpe\NetworkSession;
+
+/**
+ * Called before a packet is decoded and handled by the network session.
+ * Cancelling this event will drop the packet without decoding it, minimizing wasted CPU time.
+ */
+class DataPacketDecodeEvent extends ServerEvent implements Cancellable{
+	use CancellableTrait;
+
+	public function __construct(
+		private NetworkSession $origin,
+		private int $packetId,
+		private string $packetBuffer
+	){}
+
+	public function getOrigin() : NetworkSession{
+		return $this->origin;
+	}
+
+	public function getPacketId() : int{
+		return $this->packetId;
+	}
+
+	public function getPacketBuffer() : string{
+		return $this->packetBuffer;
+	}
+}

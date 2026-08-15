@@ -1,0 +1,89 @@
+<?php
+
+/*
+ *
+ *    _              _               
+ *   / \   _ __ ___ | |__   ___ _ __ 
+ *  / _ \ | '_ ` _ \| '_ \ / _ \ '__|
+ * / ___ \| | | | | | |_) |  __/ |   
+ * /_/   \_\_| |_| |_|_.__/ \___|_|   
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * @author AmberPM Team
+ * @link https://github.com/Amber-PM/Amber
+ *
+ *
+ */
+
+declare(strict_types=1);
+
+namespace pocketmine\network\mcpe\convert;
+
+use pocketmine\entity\InvalidSkinException;
+use pocketmine\entity\Skin;
+use pocketmine\network\mcpe\protocol\types\skin\SkinData;
+use pocketmine\network\mcpe\protocol\types\skin\SkinImage;
+use function is_array;
+use function is_string;
+use function json_decode;
+use function json_encode;
+use function random_bytes;
+use function str_repeat;
+use const JSON_THROW_ON_ERROR;
+
+class LegacySkinAdapter implements SkinAdapter{
+
+	/**
+	 * @phpstan-var \WeakMap<Skin, SkinData>
+	 */
+	private static ?\WeakMap $personaSkins = null;
+
+	public function __construct(){
+		self::$personaSkins ??= new \WeakMap();
+	}
+
+	public function toSkinData(Skin $skin) : SkinData{
+		$persona = self::$personaSkins[$skin] ?? null;
+		if($persona !== null){
+			return $persona;
+		}
+
+		$capeData = $skin->getCapeData();
+		$capeImage = $capeData === "" ? new SkinImage(0, 0, "") : new SkinImage(32, 64, $capeData);
+		$geometryName = $skin->getGeometryName();
+		if($geometryName === ""){
+			$geometryName = "geometry.humanoid.custom";
+		}
+		return new SkinData(
+			$skin->getSkinId(),
+			"", //TODO: playfab ID
+			json_encode(["geometry" => ["default" => $geometryName]], JSON_THROW_ON_ERROR),
+			SkinImage::fromLegacy($skin->getSkinData()), [],
+			$capeImage,
+			$skin->getGeometryData()
+		);
+	}
+
+	public function fromSkinData(SkinData $data) : Skin{
+		if($data->isPersona()){
+			$skin = new Skin("Standard_Custom", str_repeat(random_bytes(3) . "\xff", 4096));
+			self::$personaSkins[$skin] = $data;
+			return $skin;
+		}
+
+		$capeData = $data->isPersonaCapeOnClassic() ? "" : $data->getCapeImage()->getData();
+
+		$resourcePatch = json_decode($data->getResourcePatch(), true);
+		if(is_array($resourcePatch) && isset($resourcePatch["geometry"]["default"]) && is_string($resourcePatch["geometry"]["default"])){
+			$geometryName = $resourcePatch["geometry"]["default"];
+		}else{
+			throw new InvalidSkinException("Missing geometry name field");
+		}
+
+		return new Skin($data->getSkinId(), $data->getSkinImage()->getData(), $capeData, $geometryName, $data->getGeometryData());
+	}
+}

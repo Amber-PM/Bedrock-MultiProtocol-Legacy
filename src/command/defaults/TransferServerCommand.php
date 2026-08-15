@@ -1,0 +1,56 @@
+<?php
+
+/*
+ *
+ *    _              _               
+ *   / \   _ __ ___ | |__   ___ _ __ 
+ *  / _ \ | '_ ` _ \| '_ \ / _ \ '__|
+ * / ___ \| | | | | | |_) |  __/ |   
+ * /_/   \_\_| |_| |_|_.__/ \___|_|   
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * @author AmberPM Team
+ * @link https://github.com/Amber-PM/Amber
+ *
+ *
+ */
+
+declare(strict_types=1);
+
+namespace pocketmine\command\defaults;
+
+use pocketmine\command\CommandSender;
+use pocketmine\command\OverloadedCommand;
+use pocketmine\lang\KnownTranslationFactory;
+use pocketmine\permission\DefaultPermissionNames;
+use pocketmine\player\Player;
+use pocketmine\utils\TextFormat;
+
+class TransferServerCommand extends OverloadedCommand{
+
+	public function __construct(){
+		parent::__construct(
+			"transferserver",
+			KnownTranslationFactory::pocketmine_command_transferserver_description(),
+			KnownTranslationFactory::pocketmine_command_transferserver_usage()
+		);
+		$this->setPermission(DefaultPermissionNames::COMMAND_TRANSFERSERVER);
+
+		$this->addOverload(fn(CommandSender $sender, string $address, ?int $port = null) => $this->transfer($sender, $address, $port));
+	}
+
+	private function transfer(CommandSender $sender, string $address, ?int $port) : bool{
+		if(!($sender instanceof Player)){
+			$sender->sendMessage(KnownTranslationFactory::pocketmine_command_error_playerUserOnly()->prefix(TextFormat::RED));
+			return false;
+		}
+
+		$sender->transfer($address, $port ?? 19132);
+
+		return true;
+	}
+}

@@ -1,0 +1,230 @@
+<?php
+
+/*
+ *
+ *    _              _               
+ *   / \   _ __ ___ | |__   ___ _ __ 
+ *  / _ \ | '_ ` _ \| '_ \ / _ \ '__|
+ * / ___ \| | | | | | |_) |  __/ |   
+ * /_/   \_\_| |_| |_|_.__/ \___|_|   
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * @author AmberPM Team
+ * @link https://github.com/Amber-PM/Amber
+ *
+ *
+ */
+declare(strict_types=1);
+
+namespace pocketmine\command\defaults;
+
+use pocketmine\block\BlockTypeIds;
+use pocketmine\color\Color;
+use pocketmine\command\CommandSender;
+use pocketmine\command\OverloadedCommand;
+use pocketmine\command\overload\StringArgumentParser;
+use pocketmine\command\overload\Vector3ArgumentParser;
+use pocketmine\item\StringToItemParser;
+use pocketmine\item\VanillaItems;
+use pocketmine\lang\KnownTranslationFactory;
+use pocketmine\math\Vector3;
+use pocketmine\permission\DefaultPermissionNames;
+use pocketmine\player\Player;
+use pocketmine\utils\Random;
+use pocketmine\utils\TextFormat;
+use pocketmine\world\particle\AngryVillagerParticle;
+use pocketmine\world\particle\BlockForceFieldParticle;
+use pocketmine\world\particle\BubbleParticle;
+use pocketmine\world\particle\CriticalParticle;
+use pocketmine\world\particle\DustParticle;
+use pocketmine\world\particle\EnchantmentTableParticle;
+use pocketmine\world\particle\EnchantParticle;
+use pocketmine\world\particle\EntityFlameParticle;
+use pocketmine\world\particle\ExplodeParticle;
+use pocketmine\world\particle\FlameParticle;
+use pocketmine\world\particle\HappyVillagerParticle;
+use pocketmine\world\particle\HeartParticle;
+use pocketmine\world\particle\HugeExplodeParticle;
+use pocketmine\world\particle\HugeExplodeSeedParticle;
+use pocketmine\world\particle\InkParticle;
+use pocketmine\world\particle\InstantEnchantParticle;
+use pocketmine\world\particle\ItemBreakParticle;
+use pocketmine\world\particle\LavaDripParticle;
+use pocketmine\world\particle\LavaParticle;
+use pocketmine\world\particle\Particle;
+use pocketmine\world\particle\PortalParticle;
+use pocketmine\world\particle\RainSplashParticle;
+use pocketmine\world\particle\RedstoneParticle;
+use pocketmine\world\particle\SmokeParticle;
+use pocketmine\world\particle\SonicExplosionParticle;
+use pocketmine\world\particle\SplashParticle;
+use pocketmine\world\particle\SporeParticle;
+use pocketmine\world\particle\TerrainParticle;
+use pocketmine\world\particle\WaterDripParticle;
+use pocketmine\world\particle\WaterParticle;
+use function count;
+use function explode;
+use function max;
+use function microtime;
+use function mt_rand;
+
+class ParticleCommand extends OverloadedCommand{
+
+	private const NAMES = [
+		"explode", "hugeexplosion", "hugeexplosionseed", "bubble", "splash", "wake", "water", "crit",
+		"smoke", "spell", "instantspell", "dripwater", "driplava", "townaura", "spore", "portal",
+		"flame", "lava", "reddust", "snowballpoof", "slime", "itembreak", "terrain", "heart", "ink",
+		"droplet", "enchantmenttable", "happyvillager", "angryvillager", "forcefield", "mobflame",
+		"iconcrack", "blockcrack", "blockdust", "sonicexplosion"
+	];
+
+	public function __construct(){
+		parent::__construct(
+			"particle",
+			KnownTranslationFactory::pocketmine_command_particle_description(),
+			KnownTranslationFactory::pocketmine_command_particle_usage()
+		);
+		$this->setPermission(DefaultPermissionNames::COMMAND_PARTICLE);
+
+		$this->addOverload(
+			fn(CommandSender $sender, string $name, Vector3 $position, float $xd, float $yd, float $zd, ?int $count = null, ?string $data = null)
+				=> $this->spawnParticles($sender, $name, $position, $xd, $yd, $zd, $count, $data),
+			explicitParsers: [
+				"name" => new StringArgumentParser(self::NAMES),
+				"position" => new Vector3ArgumentParser()
+			]
+		);
+	}
+
+	private function spawnParticles(CommandSender $sender, string $name, Vector3 $position, float $xd, float $yd, float $zd, ?int $count, ?string $data) : bool{
+		$particle = $this->getParticle($name, $data);
+		if($particle === null){
+			$sender->sendMessage(KnownTranslationFactory::commands_particle_notFound($name)->prefix(TextFormat::RED));
+			return true;
+		}
+
+		$amount = max(1, $count ?? 1);
+		$sender->sendMessage(KnownTranslationFactory::commands_particle_success($name, (string) $amount));
+
+		$world = $sender instanceof Player ? $sender->getWorld() : $sender->getServer()->getWorldManager()->getDefaultWorld();
+		$random = new Random((int) (microtime(true) * 1000) + mt_rand());
+
+		for($i = 0; $i < $amount; ++$i){
+			$world->addParticle($position->add(
+				$random->nextSignedFloat() * $xd,
+				$random->nextSignedFloat() * $yd,
+				$random->nextSignedFloat() * $zd
+			), $particle);
+		}
+
+		return true;
+	}
+
+	private function getParticle(string $name, ?string $data = null) : ?Particle{
+		switch($name){
+			case "explode":
+				return new ExplodeParticle();
+			case "hugeexplosion":
+				return new HugeExplodeParticle();
+			case "hugeexplosionseed":
+				return new HugeExplodeSeedParticle();
+			case "bubble":
+				return new BubbleParticle();
+			case "splash":
+				return new SplashParticle();
+			case "wake":
+			case "water":
+				return new WaterParticle();
+			case "crit":
+				return new CriticalParticle();
+			case "smoke":
+				return new SmokeParticle((int) ($data ?? 0));
+			case "spell":
+				return new EnchantParticle(new Color(0, 0, 0, 255));
+			case "instantspell":
+				return new InstantEnchantParticle(new Color(0, 0, 0, 255));
+			case "dripwater":
+				return new WaterDripParticle();
+			case "driplava":
+				return new LavaDripParticle();
+			case "townaura":
+			case "spore":
+				return new SporeParticle();
+			case "portal":
+				return new PortalParticle();
+			case "flame":
+				return new FlameParticle();
+			case "lava":
+				return new LavaParticle();
+			case "reddust":
+				return new RedstoneParticle((int) ($data ?? 1));
+			case "snowballpoof":
+				return new ItemBreakParticle(VanillaItems::SNOWBALL());
+			case "slime":
+				return new ItemBreakParticle(VanillaItems::SLIMEBALL());
+			case "itembreak":
+				if($data !== null){
+					$item = StringToItemParser::getInstance()->parse($data);
+					if($item !== null && !$item->isNull()){
+						return new ItemBreakParticle($item);
+					}
+				}
+				break;
+			case "terrain":
+				if($data !== null){
+					$block = StringToItemParser::getInstance()->parse($data)?->getBlock();
+					if($block !== null && $block->getTypeId() !== BlockTypeIds::AIR){
+						return new TerrainParticle($block);
+					}
+				}
+				break;
+			case "heart":
+				return new HeartParticle((int) ($data ?? 0));
+			case "ink":
+				return new InkParticle((int) ($data ?? 0));
+			case "droplet":
+				return new RainSplashParticle();
+			case "enchantmenttable":
+				return new EnchantmentTableParticle();
+			case "happyvillager":
+				return new HappyVillagerParticle();
+			case "angryvillager":
+				return new AngryVillagerParticle();
+			case "forcefield":
+				return new BlockForceFieldParticle((int) ($data ?? 0));
+			case "mobflame":
+				return new EntityFlameParticle();
+			case "iconcrack":
+				if($data !== null && ($item = StringToItemParser::getInstance()->parse($data)) !== null && !$item->isNull()){
+					return new ItemBreakParticle($item);
+				}
+				break;
+			case "blockcrack":
+				if($data !== null && ($block = StringToItemParser::getInstance()->parse($data)?->getBlock()) !== null && $block->getTypeId() !== BlockTypeIds::AIR){
+					return new TerrainParticle($block);
+				}
+				break;
+			case "blockdust":
+				if($data !== null){
+					$d = explode("_", $data, limit: 5);
+					if(count($d) >= 3){
+						return new DustParticle(new Color(
+							((int) $d[0]) & 0xff,
+							((int) $d[1]) & 0xff,
+							((int) $d[2]) & 0xff,
+							((int) ($d[3] ?? 255)) & 0xff
+						));
+					}
+				}
+				break;
+			case "sonicexplosion":
+				return new SonicExplosionParticle();
+		}
+
+		return null;
+	}
+}

@@ -1,0 +1,6 @@
+/vendor/
+/server.log
+/log_archive/
+/.idea/
+/.vscode/
+*.phar
